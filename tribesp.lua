@@ -1,7 +1,9 @@
 --[[
-    Kyu's ESP tracer v12
-    - Botão de minimizar (—) à esquerda do X
-    - Painel colapsa para altura da title bar
+    Kyu's ESP tracer v14
+    - Nomes sempre via TextLabel (fix definitivo)
+    - Botão de minimizar (—) + botão X
+    - Tema galáxia com contorno roxo
+    - Só players, 1 tracer por personagem
 ]]
 
 local Players = game:GetService("Players")
@@ -25,6 +27,9 @@ local Config = {
     MaxDistance = 100000,
     EdgeMargin = 40,
     SkipSelf = false,
+    ShowNames = true,
+    NameOffsetY = 18,
+    NameTextSize = 14,
 }
 
 local Tracers = {}
@@ -377,80 +382,123 @@ makeSlider("B", 190, "B", rgb.B)
 -- Minimize logic
 --------------------------------------------------------------------
 local Minimized = false
-
 local function setMinimized(state)
     Minimized = state
-    if Minimized then
-        Frame.Size = UDim2.new(0, 220, 0, COLLAPSED_HEIGHT)
-    else
-        Frame.Size = UDim2.new(0, 220, 0, EXPANDED_HEIGHT)
-    end
+    Frame.Size = Minimized
+        and UDim2.new(0, 220, 0, COLLAPSED_HEIGHT)
+        or UDim2.new(0, 220, 0, EXPANDED_HEIGHT)
 end
-
-MinBtn.MouseButton1Click:Connect(function()
-    setMinimized(not Minimized)
-end)
+MinBtn.MouseButton1Click:Connect(function() setMinimized(not Minimized) end)
 
 --------------------------------------------------------------------
--- Tracer helpers
+-- Tracer helpers (nome sempre em TextLabel)
 --------------------------------------------------------------------
 local HAS_DRAWING = (typeof(Drawing) == "table" and Drawing.new ~= nil)
 print("[Kyu ESP] Drawing disponível:", HAS_DRAWING)
 
-local function newTracer()
+local function newTracer(playerName)
+    local entry = { name = playerName }
+
+    -- ===== Linha: Drawing se disponível, senão Frame =====
     if HAS_DRAWING then
-        local ok, line = pcall(function() return Drawing.new("Line") end)
-        if ok and line then
+        local okL, line = pcall(function() return Drawing.new("Line") end)
+        if okL and line then
             line.Visible = false
             line.Thickness = Config.Thickness
             line.Transparency = Config.Transparency
             line.Color = Config.Color
-            return { obj = line, type = "drawing" }
+            entry.line = { obj = line, type = "drawing" }
         end
     end
-    local line = Instance.new("Frame")
-    line.BackgroundColor3 = Config.Color
-    line.BorderSizePixel = 0
-    line.AnchorPoint = Vector2.new(0.5, 0.5)
-    line.Visible = false
-    line.ZIndex = 5
-    line.Parent = ScreenGui
-    return { obj = line, type = "frame" }
+
+    if not entry.line then
+        local line = Instance.new("Frame")
+        line.BackgroundColor3 = Config.Color
+        line.BorderSizePixel = 0
+        line.AnchorPoint = Vector2.new(0.5, 0.5)
+        line.Visible = false
+        line.ZIndex = 5
+        line.Parent = ScreenGui
+        entry.line = { obj = line, type = "frame" }
+    end
+
+    -- ===== Nome: SEMPRE TextLabel =====
+    local textLabel = Instance.new("TextLabel")
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = playerName
+    textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textLabel.TextSize = Config.NameTextSize
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.Size = UDim2.new(0, 200, 0, 20)
+    textLabel.AnchorPoint = Vector2.new(0.5, 1)
+    textLabel.TextStrokeTransparency = 0
+    textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    textLabel.TextXAlignment = Enum.TextXAlignment.Center
+    textLabel.TextYAlignment = Enum.TextYAlignment.Bottom
+    textLabel.ZIndex = 10
+    textLabel.Visible = false
+    textLabel.Parent = ScreenGui
+    entry.text = { obj = textLabel, type = "frame" }
+
+    return entry
 end
 
-local function updateTracer(t, from, to)
-    if not t or not t.obj then return end
-    if t.type == "drawing" then
-        t.obj.From = from
-        t.obj.To = to
-        t.obj.Color = Config.Color
-        t.obj.Thickness = Config.Thickness
-        t.obj.Transparency = Config.Transparency
-        t.obj.Visible = Config.Enabled
-    else
-        local delta = to - from
-        local center = (from + to) * 0.5
-        t.obj.Position = UDim2.new(0, center.X, 0, center.Y)
-        t.obj.Size = UDim2.new(0, delta.Magnitude, 0, Config.Thickness)
-        t.obj.Rotation = math.deg(math.atan2(delta.Y, delta.X))
-        t.obj.BackgroundColor3 = Config.Color
-        t.obj.BackgroundTransparency = Config.Transparency
-        t.obj.Visible = Config.Enabled
+local function updateTracer(entry, from, to)
+    if not entry then return end
+
+    -- ===== LINHA =====
+    local lt = entry.line
+    if lt and lt.obj then
+        if lt.type == "drawing" then
+            lt.obj.From = from
+            lt.obj.To = to
+            lt.obj.Color = Config.Color
+            lt.obj.Thickness = Config.Thickness
+            lt.obj.Transparency = Config.Transparency
+            lt.obj.Visible = Config.Enabled
+        else
+            local delta = to - from
+            local center = (from + to) * 0.5
+            lt.obj.Position = UDim2.new(0, center.X, 0, center.Y)
+            lt.obj.Size = UDim2.new(0, delta.Magnitude, 0, Config.Thickness)
+            lt.obj.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+            lt.obj.BackgroundColor3 = Config.Color
+            lt.obj.BackgroundTransparency = Config.Transparency
+            lt.obj.Visible = Config.Enabled
+        end
+    end
+
+    -- ===== NOME =====
+    local tt = entry.text
+    if tt and tt.obj then
+        if Config.Enabled and Config.ShowNames then
+            tt.obj.Position = UDim2.new(0, to.X, 0, to.Y - Config.NameOffsetY)
+            tt.obj.Text = entry.name
+            tt.obj.Visible = true
+        else
+            tt.obj.Visible = false
+        end
     end
 end
 
-local function hideTracer(t)
-    if not t or not t.obj then return end
-    t.obj.Visible = false
+local function hideTracer(entry)
+    if not entry then return end
+    if entry.line and entry.line.obj then entry.line.obj.Visible = false end
+    if entry.text and entry.text.obj then entry.text.obj.Visible = false end
 end
 
-local function destroyTracer(t)
-    if not t or not t.obj then return end
-    if t.type == "drawing" then
-        pcall(function() t.obj:Remove() end)
-    else
-        pcall(function() t.obj:Destroy() end)
+local function destroyTracer(entry)
+    if not entry then return end
+    local function kill(t)
+        if not t or not t.obj then return end
+        if t.type == "drawing" then
+            pcall(function() t.obj:Remove() end)
+        else
+            pcall(function() t.obj:Destroy() end)
+        end
     end
+    kill(entry.line)
+    kill(entry.text)
 end
 
 --------------------------------------------------------------------
@@ -573,7 +621,8 @@ local renderConn = RunService.RenderStepped:Connect(function()
                 end
             else
                 if not Tracers[model] then
-                    Tracers[model] = newTracer()
+                    local displayName = plr and (plr.DisplayName ~= "" and plr.DisplayName or plr.Name) or model.Name
+                    Tracers[model] = newTracer(displayName)
                 end
                 local t = Tracers[model]
                 local dist = (Camera.CFrame.Position - bodyPart.Position).Magnitude
@@ -633,4 +682,4 @@ UserInputService.InputBegan:Connect(function(input, gp)
 end)
 
 updateToggleUI()
-print("[Kyu ESP] Loaded v12 - botão de minimizar adicionado.")
+print("[Kyu ESP] Loaded v14 - nomes corrigidos.")
