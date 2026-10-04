@@ -1,9 +1,9 @@
 --[[
-    Kyu's ESP tracer v14
-    - Nomes sempre via TextLabel (fix definitivo)
-    - Botão de minimizar (—) + botão X
+    Kyu's ESP tracer v15
+    - Names toggleable (botão ao lado do ESP)
+    - Cache por modelo + rescan periódico (30 frames)
+    - Só atualiza posição entre rescans
     - Tema galáxia com contorno roxo
-    - Só players, 1 tracer por personagem
 ]]
 
 local Players = game:GetService("Players")
@@ -30,9 +30,8 @@ local Config = {
     ShowNames = true,
     NameOffsetY = 18,
     NameTextSize = 14,
+    RefreshInterval = 30,   -- frames entre rescans (30 ≈ 0.5s)
 }
-
-local Tracers = {}
 
 --------------------------------------------------------------------
 -- GUI
@@ -44,11 +43,12 @@ ScreenGui.IgnoreGuiInset = true
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.Parent = CoreGui
 
+local PANEL_W = 220
 local EXPANDED_HEIGHT = 250
 local COLLAPSED_HEIGHT = 30
 
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 220, 0, EXPANDED_HEIGHT)
+Frame.Size = UDim2.new(0, PANEL_W, 0, EXPANDED_HEIGHT)
 Frame.Position = UDim2.new(0, 20, 0, 100)
 Frame.BackgroundColor3 = Color3.fromRGB(15, 10, 30)
 Frame.BorderSizePixel = 0
@@ -61,7 +61,7 @@ local Corner = Instance.new("UICorner")
 Corner.CornerRadius = UDim.new(0, 10)
 Corner.Parent = Frame
 
--- ====== Galaxy background ======
+-- Galaxy background
 local GalaxyBase = Instance.new("Frame")
 GalaxyBase.Name = "GalaxyBase"
 GalaxyBase.Size = UDim2.new(1, 0, 1, 0)
@@ -84,7 +84,6 @@ do
     local rng = Random.new(42)
     for i = 1, 45 do
         local star = Instance.new("Frame")
-        star.Name = "Star" .. i
         local size = rng:NextNumber(1, 3)
         star.Size = UDim2.new(0, size, 0, size)
         star.Position = UDim2.new(rng:NextNumber(0, 1), 0, rng:NextNumber(0, 1), 0)
@@ -94,31 +93,24 @@ do
         star.BorderSizePixel = 0
         star.ZIndex = 1
         star.Parent = GalaxyBase
-        local starCorner = Instance.new("UICorner")
-        starCorner.CornerRadius = UDim.new(1, 0)
-        starCorner.Parent = star
+        Instance.new("UICorner", star).CornerRadius = UDim.new(1, 0)
     end
     for i = 1, 4 do
         local blob = Instance.new("Frame")
-        blob.Name = "Nebula" .. i
         local w = rng:NextInteger(60, 130)
         blob.Size = UDim2.new(0, w, 0, w)
         blob.Position = UDim2.new(rng:NextNumber(-0.2, 1), 0, rng:NextNumber(-0.2, 1), 0)
         blob.AnchorPoint = Vector2.new(0.5, 0.5)
-        blob.BackgroundColor3 = (i % 2 == 0)
-            and Color3.fromRGB(140, 60, 220)
-            or Color3.fromRGB(60, 100, 220)
+        blob.BackgroundColor3 = (i % 2 == 0) and Color3.fromRGB(140, 60, 220) or Color3.fromRGB(60, 100, 220)
         blob.BackgroundTransparency = 0.85
         blob.BorderSizePixel = 0
         blob.ZIndex = 0
         blob.Parent = GalaxyBase
-        local blobCorner = Instance.new("UICorner")
-        blobCorner.CornerRadius = UDim.new(1, 0)
-        blobCorner.Parent = blob
+        Instance.new("UICorner", blob).CornerRadius = UDim.new(1, 0)
     end
 end
 
--- ====== Contorno roxo neon ======
+-- Contorno roxo neon
 local Stroke = Instance.new("UIStroke")
 Stroke.Color = Color3.fromRGB(170, 80, 255)
 Stroke.Thickness = 2
@@ -148,34 +140,31 @@ Title.Parent = Frame
 
 -- Drag do painel
 do
-    local draggingPanel = false
-    local dragStart, startPos
-
+    local dragging = false
+    local startPos, startFrame
     Title.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
            or input.UserInputType == Enum.UserInputType.Touch then
-            draggingPanel = true
-            dragStart = input.Position
-            startPos = Frame.Position
+            dragging = true
+            startPos = input.Position
+            startFrame = Frame.Position
         end
     end)
-
     UserInputService.InputChanged:Connect(function(input)
-        if not draggingPanel then return end
+        if not dragging then return end
         if input.UserInputType == Enum.UserInputType.MouseMovement
            or input.UserInputType == Enum.UserInputType.Touch then
-            local delta = input.Position - dragStart
+            local delta = input.Position - startPos
             Frame.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                startFrame.X.Scale, startFrame.X.Offset + delta.X,
+                startFrame.Y.Scale, startFrame.Y.Offset + delta.Y
             )
         end
     end)
-
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
            or input.UserInputType == Enum.UserInputType.Touch then
-            draggingPanel = false
+            dragging = false
         end
     end)
 end
@@ -192,10 +181,7 @@ MinBtn.TextSize = 14
 MinBtn.Font = Enum.Font.GothamBold
 MinBtn.ZIndex = 10
 MinBtn.Parent = Frame
-local MinCorner = Instance.new("UICorner")
-MinCorner.CornerRadius = UDim.new(0, 6)
-MinCorner.Parent = MinBtn
-
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 6)
 local MinStroke = Instance.new("UIStroke")
 MinStroke.Color = Color3.fromRGB(170, 80, 255)
 MinStroke.Thickness = 1
@@ -214,31 +200,49 @@ CloseBtn.TextSize = 14
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.ZIndex = 10
 CloseBtn.Parent = Frame
-local CloseCorner = Instance.new("UICorner")
-CloseCorner.CornerRadius = UDim.new(0, 6)
-CloseCorner.Parent = CloseBtn
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 
--- Toggle ESP
+-- ESP toggle (half width)
+local BTN_H = 30
+local BTN_Y = 38
+local BTN_W = 94
+
 local ToggleBtn = Instance.new("TextButton")
-ToggleBtn.Size = UDim2.new(1, -24, 0, 30)
-ToggleBtn.Position = UDim2.new(0, 12, 0, 38)
+ToggleBtn.Size = UDim2.new(0, BTN_W, 0, BTN_H)
+ToggleBtn.Position = UDim2.new(0, 12, 0, BTN_Y)
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(130, 60, 210)
 ToggleBtn.BorderSizePixel = 0
 ToggleBtn.Text = "ESP: ON"
 ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleBtn.TextSize = 13
+ToggleBtn.TextSize = 12
 ToggleBtn.Font = Enum.Font.GothamBold
 ToggleBtn.ZIndex = 10
 ToggleBtn.Parent = Frame
-local ToggleCorner = Instance.new("UICorner")
-ToggleCorner.CornerRadius = UDim.new(0, 6)
-ToggleCorner.Parent = ToggleBtn
-
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 6)
 local ToggleStroke = Instance.new("UIStroke")
 ToggleStroke.Color = Color3.fromRGB(170, 80, 255)
 ToggleStroke.Thickness = 1
 ToggleStroke.Transparency = 0.3
 ToggleStroke.Parent = ToggleBtn
+
+-- Names toggle (half width, à direita do ESP)
+local NamesBtn = Instance.new("TextButton")
+NamesBtn.Size = UDim2.new(0, BTN_W, 0, BTN_H)
+NamesBtn.Position = UDim2.new(0, 114, 0, BTN_Y)  -- 12 + 94 + 8 = 114
+NamesBtn.BackgroundColor3 = Color3.fromRGB(130, 60, 210)
+NamesBtn.BorderSizePixel = 0
+NamesBtn.Text = "Names: ON"
+NamesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+NamesBtn.TextSize = 12
+NamesBtn.Font = Enum.Font.GothamBold
+NamesBtn.ZIndex = 10
+NamesBtn.Parent = Frame
+Instance.new("UICorner", NamesBtn).CornerRadius = UDim.new(0, 6)
+local NamesStroke = Instance.new("UIStroke")
+NamesStroke.Color = Color3.fromRGB(170, 80, 255)
+NamesStroke.Thickness = 1
+NamesStroke.Transparency = 0.3
+NamesStroke.Parent = NamesBtn
 
 -- Color preview
 local ColorPreview = Instance.new("Frame")
@@ -248,10 +252,7 @@ ColorPreview.BackgroundColor3 = Config.Color
 ColorPreview.BorderSizePixel = 0
 ColorPreview.ZIndex = 10
 ColorPreview.Parent = Frame
-local ColorPrevCorner = Instance.new("UICorner")
-ColorPrevCorner.CornerRadius = UDim.new(0, 6)
-ColorPrevCorner.Parent = ColorPreview
-
+Instance.new("UICorner", ColorPreview).CornerRadius = UDim.new(0, 6)
 local ColorPrevStroke = Instance.new("UIStroke")
 ColorPrevStroke.Color = Color3.fromRGB(170, 80, 255)
 ColorPrevStroke.Thickness = 1
@@ -295,10 +296,7 @@ local function makeSlider(name, yPos, channel, initial)
     bar.BorderSizePixel = 0
     bar.ZIndex = 10
     bar.Parent = Frame
-
-    local barCorner = Instance.new("UICorner")
-    barCorner.CornerRadius = UDim.new(1, 0)
-    barCorner.Parent = bar
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
 
     local fill = Instance.new("Frame")
     fill.Size = UDim2.new(initial / 255, 0, 1, 0)
@@ -306,13 +304,9 @@ local function makeSlider(name, yPos, channel, initial)
     fill.BorderSizePixel = 0
     fill.ZIndex = 11
     fill.Parent = bar
-
-    local fillCorner = Instance.new("UICorner")
-    fillCorner.CornerRadius = UDim.new(1, 0)
-    fillCorner.Parent = fill
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
 
     local knob = Instance.new("Frame")
-    knob.Name = "Knob"
     knob.Size = UDim2.new(0, 16, 0, 16)
     knob.AnchorPoint = Vector2.new(0.5, 0.5)
     knob.Position = UDim2.new(initial / 255, 0, 0.5, 0)
@@ -320,11 +314,7 @@ local function makeSlider(name, yPos, channel, initial)
     knob.BorderSizePixel = 0
     knob.ZIndex = 12
     knob.Parent = bar
-
-    local knobCorner = Instance.new("UICorner")
-    knobCorner.CornerRadius = UDim.new(1, 0)
-    knobCorner.Parent = knob
-
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
     local knobStroke = Instance.new("UIStroke")
     knobStroke.Color = Color3.fromRGB(170, 80, 255)
     knobStroke.Thickness = 2
@@ -348,15 +338,12 @@ local function makeSlider(name, yPos, channel, initial)
         ActiveSliderFn = updateFromX
         updateFromX(UserInputService:GetMouseLocation().X)
     end)
-
     knob.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
            or input.UserInputType == Enum.UserInputType.Touch then
             ActiveSliderFn = updateFromX
         end
     end)
-
-    return bar
 end
 
 UserInputService.InputChanged:Connect(function(input)
@@ -366,7 +353,6 @@ UserInputService.InputChanged:Connect(function(input)
         ActiveSliderFn(input.Position.X)
     end
 end)
-
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
        or input.UserInputType == Enum.UserInputType.Touch then
@@ -379,19 +365,18 @@ makeSlider("G", 148, "G", rgb.G)
 makeSlider("B", 190, "B", rgb.B)
 
 --------------------------------------------------------------------
--- Minimize logic
+-- Minimize
 --------------------------------------------------------------------
 local Minimized = false
-local function setMinimized(state)
-    Minimized = state
+MinBtn.MouseButton1Click:Connect(function()
+    Minimized = not Minimized
     Frame.Size = Minimized
-        and UDim2.new(0, 220, 0, COLLAPSED_HEIGHT)
-        or UDim2.new(0, 220, 0, EXPANDED_HEIGHT)
-end
-MinBtn.MouseButton1Click:Connect(function() setMinimized(not Minimized) end)
+        and UDim2.new(0, PANEL_W, 0, COLLAPSED_HEIGHT)
+        or UDim2.new(0, PANEL_W, 0, EXPANDED_HEIGHT)
+end)
 
 --------------------------------------------------------------------
--- Tracer helpers (nome sempre em TextLabel)
+-- Tracer helpers
 --------------------------------------------------------------------
 local HAS_DRAWING = (typeof(Drawing) == "table" and Drawing.new ~= nil)
 print("[Kyu ESP] Drawing disponível:", HAS_DRAWING)
@@ -399,7 +384,6 @@ print("[Kyu ESP] Drawing disponível:", HAS_DRAWING)
 local function newTracer(playerName)
     local entry = { name = playerName }
 
-    -- ===== Linha: Drawing se disponível, senão Frame =====
     if HAS_DRAWING then
         local okL, line = pcall(function() return Drawing.new("Line") end)
         if okL and line then
@@ -422,7 +406,7 @@ local function newTracer(playerName)
         entry.line = { obj = line, type = "frame" }
     end
 
-    -- ===== Nome: SEMPRE TextLabel =====
+    -- Nome SEMPRE em TextLabel
     local textLabel = Instance.new("TextLabel")
     textLabel.BackgroundTransparency = 1
     textLabel.Text = playerName
@@ -444,9 +428,7 @@ local function newTracer(playerName)
 end
 
 local function updateTracer(entry, from, to)
-    if not entry then return end
-
-    -- ===== LINHA =====
+    -- Linha
     local lt = entry.line
     if lt and lt.obj then
         if lt.type == "drawing" then
@@ -468,21 +450,20 @@ local function updateTracer(entry, from, to)
         end
     end
 
-    -- ===== NOME =====
+    -- Nome (só posiciona e alterna visibilidade — texto não muda)
     local tt = entry.text
     if tt and tt.obj then
-        if Config.Enabled and Config.ShowNames then
+        local show = Config.Enabled and Config.ShowNames
+        if show then
             tt.obj.Position = UDim2.new(0, to.X, 0, to.Y - Config.NameOffsetY)
-            tt.obj.Text = entry.name
-            tt.obj.Visible = true
-        else
+            if not tt.obj.Visible then tt.obj.Visible = true end
+        elseif tt.obj.Visible then
             tt.obj.Visible = false
         end
     end
 end
 
 local function hideTracer(entry)
-    if not entry then return end
     if entry.line and entry.line.obj then entry.line.obj.Visible = false end
     if entry.text and entry.text.obj then entry.text.obj.Visible = false end
 end
@@ -502,10 +483,9 @@ local function destroyTracer(entry)
 end
 
 --------------------------------------------------------------------
--- Detecção: é player?
+-- Detecção (rodam SÓ no rescan, não a cada frame)
 --------------------------------------------------------------------
 local function isPlayerCharacter(model)
-    if not model then return false, nil end
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr.Character == model then return true, plr end
     end
@@ -533,11 +513,7 @@ local function isPlayerCharacter(model)
     return false, nil
 end
 
---------------------------------------------------------------------
--- Corpo (Mid)
---------------------------------------------------------------------
 local function getBodyPart(model)
-    if not model then return nil end
     local detail = model:FindFirstChild("Detail") or model:FindFirstChild("Detail", true)
     if not detail then
         return model:FindFirstChild("HumanoidRootPart")
@@ -551,6 +527,111 @@ local function getBodyPart(model)
     if body and body:IsA("BasePart") then return body end
     return nil
 end
+
+--------------------------------------------------------------------
+-- Cache + rescan
+--------------------------------------------------------------------
+local ModelCache = setmetatable({}, {__mode = "k"})
+-- ModelCache[model] = { isPlayer = bool, player = Player?, bodyPart = BasePart?, entry = tracer? }
+
+local TrackedModels = {}   -- array de models ativos
+local refreshPending = true
+
+-- Rescan completo (roda a cada RefreshInterval frames)
+local function rescan()
+    local folder = Workspace:FindFirstChild("Characters")
+    if not folder then
+        -- Limpa tudo se a pasta sumir
+        for _, model in ipairs(TrackedModels) do
+            local cache = ModelCache[model]
+            if cache and cache.entry then
+                destroyTracer(cache.entry)
+                cache.entry = nil
+            end
+        end
+        TrackedModels = {}
+        return
+    end
+
+    local newTracked = {}
+    local children = folder:GetChildren()
+
+    for i = 1, #children do
+        local model = children[i]
+        local cache = ModelCache[model]
+
+        if not cache then
+            cache = { isPlayer = nil, player = nil, bodyPart = nil, entry = nil }
+            ModelCache[model] = cache
+        end
+
+        -- Detecta uma vez se é player
+        if cache.isPlayer == nil then
+            local isP, plr = isPlayerCharacter(model)
+            cache.isPlayer = isP
+            cache.player = plr
+        end
+
+        -- Só rastreia players
+        if cache.isPlayer then
+            -- Pula o próprio se configurado
+            local skip = Config.SkipSelf and cache.player == LocalPlayer
+            if not skip then
+                -- Atualiza bodyPart se não existe ou foi removido do modelo
+                if not cache.bodyPart or not cache.bodyPart.Parent then
+                    cache.bodyPart = getBodyPart(model)
+                end
+
+                if cache.bodyPart then
+                    if not cache.entry then
+                        local plr = cache.player
+                        local displayName = (plr and ((plr.DisplayName ~= "" and plr.DisplayName) or plr.Name)) or model.Name
+                        cache.entry = newTracer(displayName)
+                    end
+                    newTracked[#newTracked + 1] = model
+                else
+                    -- Perdeu bodyPart → remove tracer
+                    if cache.entry then
+                        destroyTracer(cache.entry)
+                        cache.entry = nil
+                    end
+                end
+            else
+                if cache.entry then
+                    destroyTracer(cache.entry)
+                    cache.entry = nil
+                end
+            end
+        else
+            -- Não é player → limpa se já tinha tracer
+            if cache.entry then
+                destroyTracer(cache.entry)
+                cache.entry = nil
+            end
+        end
+    end
+
+    -- Limpa tracers de modelos que saíram
+    for _, model in ipairs(TrackedModels) do
+        local inNew = false
+        for i = 1, #newTracked do
+            if newTracked[i] == model then inNew = true break end
+        end
+        if not inNew then
+            local cache = ModelCache[model]
+            if cache and cache.entry then
+                destroyTracer(cache.entry)
+                cache.entry = nil
+            end
+        end
+    end
+
+    TrackedModels = newTracked
+end
+
+-- Força rescan quando um player entra/sai
+Players.PlayerAdded:Connect(function() refreshPending = true end)
+Players.PlayerRemoving:Connect(function() refreshPending = true end)
 
 --------------------------------------------------------------------
 -- Clamp off-screen
@@ -593,55 +674,46 @@ local function computeScreenTarget(worldPos)
 end
 
 --------------------------------------------------------------------
--- Main loop
+-- Main loop otimizado
 --------------------------------------------------------------------
+local frameCounter = 0
+local refreshInterval = Config.RefreshInterval
+
 local renderConn = RunService.RenderStepped:Connect(function()
-    local folder = Workspace:FindFirstChild("Characters")
-    if not folder then return end
-
-    for _, model in ipairs(folder:GetChildren()) do
-        local isPlayer, plr = isPlayerCharacter(model)
-
-        if not isPlayer then
-            if Tracers[model] then
-                destroyTracer(Tracers[model])
-                Tracers[model] = nil
-            end
-        elseif Config.SkipSelf and plr == LocalPlayer then
-            if Tracers[model] then
-                destroyTracer(Tracers[model])
-                Tracers[model] = nil
-            end
-        else
-            local bodyPart = getBodyPart(model)
-            if not bodyPart then
-                if Tracers[model] then
-                    destroyTracer(Tracers[model])
-                    Tracers[model] = nil
-                end
-            else
-                if not Tracers[model] then
-                    local displayName = plr and (plr.DisplayName ~= "" and plr.DisplayName or plr.Name) or model.Name
-                    Tracers[model] = newTracer(displayName)
-                end
-                local t = Tracers[model]
-                local dist = (Camera.CFrame.Position - bodyPart.Position).Magnitude
-
-                if Config.Enabled and dist <= Config.MaxDistance then
-                    local to, cx, cy = computeScreenTarget(bodyPart.Position)
-                    local from = Vector2.new(cx, cy)
-                    updateTracer(t, from, to)
-                else
-                    hideTracer(t)
-                end
-            end
-        end
+    -- Rescan periódico
+    frameCounter = frameCounter + 1
+    if frameCounter >= refreshInterval or refreshPending then
+        frameCounter = 0
+        refreshPending = false
+        rescan()
     end
 
-    for model, t in pairs(Tracers) do
-        if not model.Parent then
-            destroyTracer(t)
-            Tracers[model] = nil
+    -- Atualização de posição (só para os modelos rastreados)
+    if not Config.Enabled then
+        -- Se desabilitado, esconde tudo
+        for i = 1, #TrackedModels do
+            local cache = ModelCache[TrackedModels[i]]
+            if cache and cache.entry then hideTracer(cache.entry) end
+        end
+        return
+    end
+
+    local camCFrame = Camera.CFrame
+    local camPos = camCFrame.Position
+    local maxDist = Config.MaxDistance
+
+    for i = 1, #TrackedModels do
+        local model = TrackedModels[i]
+        local cache = ModelCache[model]
+        if cache and cache.entry and cache.bodyPart then
+            local part = cache.bodyPart
+            local dist = (camPos - part.Position).Magnitude
+            if dist <= maxDist then
+                local to, cx, cy = computeScreenTarget(part.Position)
+                updateTracer(cache.entry, Vector2.new(cx, cy), to)
+            else
+                hideTracer(cache.entry)
+            end
         end
     end
 end)
@@ -659,15 +731,32 @@ local function updateToggleUI()
     end
 end
 
+local function updateNamesUI()
+    if Config.ShowNames then
+        NamesBtn.Text = "Names: ON"
+        NamesBtn.BackgroundColor3 = Color3.fromRGB(130, 60, 210)
+    else
+        NamesBtn.Text = "Names: OFF"
+        NamesBtn.BackgroundColor3 = Color3.fromRGB(90, 30, 120)
+    end
+end
+
 ToggleBtn.MouseButton1Click:Connect(function()
     Config.Enabled = not Config.Enabled
     updateToggleUI()
 end)
 
+NamesBtn.MouseButton1Click:Connect(function()
+    Config.ShowNames = not Config.ShowNames
+    updateNamesUI()
+end)
+
 local function unload()
     if renderConn then renderConn:Disconnect() renderConn = nil end
-    for _, t in pairs(Tracers) do destroyTracer(t) end
-    Tracers = {}
+    for _, cache in pairs(ModelCache) do
+        if cache.entry then destroyTracer(cache.entry) end
+    end
+    TrackedModels = {}
     pcall(function() ScreenGui:Destroy() end)
     print("[Kyu ESP] Unloaded.")
 end
@@ -682,4 +771,5 @@ UserInputService.InputBegan:Connect(function(input, gp)
 end)
 
 updateToggleUI()
-print("[Kyu ESP] Loaded v14 - nomes corrigidos.")
+updateNamesUI()
+print("[Kyu ESP] Loaded v15 - otimizado, names toggleable.")
